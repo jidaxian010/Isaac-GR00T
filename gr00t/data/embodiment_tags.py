@@ -34,5 +34,5 @@ class EmbodimentTag(Enum):
     
     libero_arm = "libero_arm"
     """
-    The Libero arm embodiment.
+    The Libero arm embodiment...
     """
