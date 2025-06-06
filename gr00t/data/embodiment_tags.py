@@ -26,3 +26,13 @@ class EmbodimentTag(Enum):
     """
     Any new embodiment for finetuning.
     """
+
+    SO100 = "so100"
+    """
+    The SO100 robot embodiment.
+    """
+    
+    libero_arm = "libero_arm"
+    """
+    The Libero arm embodiment.
+    """

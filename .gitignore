@@ -22,7 +22,6 @@ share/python-wheels/
 MANIFEST
 
 # build artifacts
-
 .eggs/
 .mypy_cache
 *.egg-info/
@@ -30,9 +29,7 @@ build/
 dist/
 pip-wheel-metadata/
 
-
 # dev tools
-
 .envrc
 .python-version
 .idea
@@ -43,33 +40,25 @@ pyrightconfig.json
 .ruff_cache/
 
 # jupyter notebooks
-
 .ipynb_checkpoints
 
-
 # miscellaneous
-
 .cache/
 doc/_build/
 *.swp
 .DS_Store
 
-
 # python
-
 *.pyc
 *.pyo
 __pycache__
 
-
 # testing and continuous integration
-
 .coverage
 .pytest_cache/
 .benchmarks
 
 # documentation build artifacts
-
 docs/build
 site/
 
@@ -89,7 +78,6 @@ captioner/
 hostfile
 *_dev.py
 *_dev.sh
-
 
 # Python
 __pycache__
@@ -118,7 +106,12 @@ playground/
 # Hydra 
 .hydra/
 
-# Data
-demo_data/gr00t-gr1-apple-to-shelf/
+# Data and Checkpoints
+demo_data/
+checkpoints/
 tmp/
 output/
+
+# Keep directory structure but ignore contents
+!demo_data/.gitkeep
+!checkpoints/.gitkeep

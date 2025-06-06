@@ -65,6 +65,8 @@ class GR00TTransform(InvertibleModalityTransform):
     _EMBODIMENT_TAG_MAPPING = {
         "gr1": 24,
         "new_embodiment": 31,  # use the last projector for new embodiment,
+        "so100": 31,
+        "libero_arm": 30,
     }
 
     # -- We inherit from ModalityTransform, so we keep apply_to as well --

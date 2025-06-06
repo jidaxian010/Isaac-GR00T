@@ -253,6 +253,7 @@ class Gr00tPolicy(BasePolicy):
             )
 
         metadata = DatasetMetadata.model_validate(metadata_dict)
+        print("path ", self.model_path)
 
         self._modality_transform.set_metadata(metadata)
         self.metadata = metadata
