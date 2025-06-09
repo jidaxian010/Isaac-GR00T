@@ -2,92 +2,258 @@ import os
 import torch
 import gr00t
 import numpy as np
-
+import matplotlib.pyplot as plt
 from gr00t.data.dataset import LeRobotSingleDataset
 from gr00t.model.policy import Gr00tPolicy
 from gr00t.experiment.data_config import DATA_CONFIG_MAP
 
-REPO_PATH = os.path.dirname(os.path.dirname(gr00t.__file__))
-MODEL_PATH = "./checkpoints/libero-object-checkpoints"
-# MODEL_PATH = "./checkpoints/so100-checkpoints"
-DATASET_PATH = os.path.join(REPO_PATH, "demo_data/libero_object_data")
-# DATASET_PATH = os.path.join(REPO_PATH, "demo_data/so100_strawberry_grape")
-EMBODIMENT_TAG = "libero_arm"
-# EMBODIMENT_TAG = "so100"
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-data_config = DATA_CONFIG_MAP["custom_panda_hand"]
-# data_config = DATA_CONFIG_MAP["so100"]
-modality_config = data_config.modality_config()
-modality_transform = data_config.transform()
+class PolicyEvaluator:
+    def __init__(
+        self,
+        model_path: str,
+        dataset_path: str,
+        embodiment_tag: str,
+        data_config_name: str,
+        video_backend: str,
+        device: str = None
+    ):
+        """
+        Initialize the policy evaluator.
+
+        Args:
+            model_path (str): Path to the model checkpoint directory
+            dataset_path (str): Path to the dataset directory
+            embodiment_tag (str): Embodiment tag for the model
+            data_config_name (str): Name of the data configuration from DATA_CONFIG_MAP
+            video_backend (str): Backend to use for video loading
+            device (str): Device to run the model on (default: "cuda" if available, else "cpu")
+        """
+        self.repo_path = os.path.dirname(os.path.dirname(gr00t.__file__))
+        self.model_path = model_path
+        self.dataset_path = dataset_path
+        self.embodiment_tag = embodiment_tag
+        self.video_backend = video_backend
+        self.device = device if device is not None else ("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Load data configuration
+        self.data_config = DATA_CONFIG_MAP[data_config_name]
+        self.modality_config = self.data_config.modality_config()
+        self.modality_transform = self.data_config.transform()
+
+        # Initialize policy and dataset
+        self._init_policy()
+        self._init_dataset()
+
+    def _init_policy(self):
+        """Initialize the policy model."""
+        self.policy = Gr00tPolicy(
+            model_path=self.model_path,
+            embodiment_tag=self.embodiment_tag,
+            modality_config=self.modality_config,
+            modality_transform=self.modality_transform,
+            device=self.device,
+        )
+
+    def _init_dataset(self):
+        """Initialize the dataset."""
+        self.dataset = LeRobotSingleDataset(
+            dataset_path=self.dataset_path,
+            modality_configs=self.modality_config,
+            video_backend=self.video_backend,
+            video_backend_kwargs=None,
+            transforms=None,  # We'll handle transforms separately through the policy
+            embodiment_tag=self.embodiment_tag,
+        )
+
+    def print_configuration(self):
+        """Print the configuration details."""
+        print("\n=== Policy Configuration ===")
+        print("Model:", self.policy.model)
+        print("\nModality Config Keys:", self.modality_config.keys())
+
+        print("\n=== Modality Config Details ===")
+        for key, value in self.modality_config.items():
+            if isinstance(value, np.ndarray):
+                print(f"{key}: shape={value.shape}")
+            else:
+                print(f"{key}: {value}")
+
+    def print_step_data(self, step_idx: int = 0):
+        """
+        Print details about a specific step from the dataset.
+
+        Args:
+            step_idx (int): Index of the step to print (default: 0)
+        """
+        step_data = self.dataset[step_idx]
+        print("\n=== Step Data Contents ===")
+        print("Keys:", step_data.keys())
+        for key, value in step_data.items():
+            if isinstance(value, np.ndarray):
+                print(f"\n{key}:")
+                print(f"  Shape: {value.shape}")
+                print(f"  Type: {value.dtype}")
+                print(f"  Range: [{value.min():.3f}, {value.max():.3f}]")
+                if value.size < 10:  # Only print small arrays
+                    print(f"  Values: {value}")
+            else:
+                print(f"\n{key}:")
+                print(f"  Type: {type(value)}")
+                if isinstance(value, list) and len(value) < 10:
+                    print(f"  Values: {value}")
+    
+    def compare_results_so100(self):
+        """
+        Compare the predicted action with the ground truth action.
+        Creates subplots for each joint (5 arm joints + 1 gripper).
+        """
+        gt_arm_list = []
+        gt_gripper_list = []
+        predicted_arm_list = []
+        predicted_gripper_list = []
+        
+
+        for i in range(80):
+            step_data = self.dataset[i]
+            gt_arm = step_data["action.single_arm"]  # dim = 5
+            gt_gripper = step_data["action.gripper"]  # dim = 1
+            predicted_action = self.policy.get_action(step_data)
+            predicted_arm = predicted_action["action.single_arm"]  # dim = 5
+            predicted_gripper = predicted_action["action.gripper"]  # dim = 1
+            
+            gt_arm_list.append(gt_arm[0])
+            gt_gripper_list.append(gt_gripper[0])
+            predicted_arm_list.append(predicted_arm[0])
+            predicted_gripper_list.append(predicted_gripper[0])
+        
+        gt_arm_array = np.array(gt_arm_list)
+        gt_gripper_array = np.array(gt_gripper_list)
+        predicted_arm_array = np.array(predicted_arm_list)
+        predicted_gripper_array = np.array(predicted_gripper_list)
+
+        # print
+        print("its the shape",gt_arm_array.shape)
+        
+        # Create subplots for each joint
+        joint_names = ['Joint 1', 'Joint 2', 'Joint 3', 'Joint 4', 'Joint 5', 'Gripper']
+        fig, axs = plt.subplots(3, 2, figsize=(15, 15))
+        axs = axs.flatten()
+
+        # Plot arm joints
+        for i in range(5):
+            axs[i].plot(gt_arm_array[:, i], label='Ground Truth', color='blue')
+            axs[i].plot(predicted_arm_array[:, i], label='Predicted', color='red', linestyle='--')
+            axs[i].set_title(f'{joint_names[i]}')
+            axs[i].set_xlabel('Time Step')
+            axs[i].set_ylabel('Joint Value')
+            axs[i].legend()
+            axs[i].grid(True)
+
+        # Plot gripper
+        axs[5].plot(gt_gripper_array, label='Ground Truth', color='blue')
+        axs[5].plot(predicted_gripper_array, label='Predicted', color='red', linestyle='--')
+        axs[5].set_title('Gripper')
+        axs[5].set_xlabel('Time Step')
+        axs[5].set_ylabel('Gripper Value')
+        axs[5].legend()
+        axs[5].grid(True)
+
+        plt.tight_layout()
+        plt.show()
+
+    def compare_results_libero(self):
+        """
+        Compare the predicted action with the ground truth action.
+        Creates subplots for each joint (5 arm joints + 1 gripper).
+        """
+        gt_all_actions_list = []
+        predicted_all_actions_list = []
+        joint_states_list = []
+        print(len(self.dataset))
+        for i in range(200):
+            step_data = self.dataset[i]
+            gt_all_actions = step_data["action.all_actions"]
+            predicted_all_actions = self.policy.get_action(step_data)["action.all_actions"]
+
+            gt_all_actions_list.append(gt_all_actions[0])
+            predicted_all_actions_list.append(predicted_all_actions[0])
+            joint_states_list.append(step_data["state.joint_states"][0])
+
+        gt_all_actions_array = np.array(gt_all_actions_list)
+        predicted_all_actions_array = np.array(predicted_all_actions_list)
+        joint_states_array = np.array(joint_states_list)
+        # print
+        print("its the action shape",gt_all_actions_array.shape)
+        print("its the state shape",joint_states_array.shape)
+        # Create subplots for each joint
+        joint_names = ['Joint 1', 'Joint 2', 'Joint 3', 'Joint 4', 'Joint 5', 'Joint 6', 'Joint 7']
+        fig, axs = plt.subplots(4, 2, figsize=(15, 15))
+        axs = axs.flatten()
+
+        # Plot arm joints
+        for i in range(7):
+            axs[i].plot(gt_all_actions_array[:, i], label='Ground Truth', color='blue')
+            axs[i].plot(predicted_all_actions_array[:, i], label='Predicted', color='red', linestyle='--')
+            axs[i].plot(joint_states_array[:, i], label='Joint States', color='green')
+            axs[i].set_title(f'{joint_names[i]}')
+            axs[i].set_xlabel('Time Step')
+            axs[i].set_ylabel('Joint Value')
+            axs[i].legend()
+            axs[i].grid(True)
+
+        plt.tight_layout()
+        plt.show()
+
+    def get_action(self, step_idx: int = 0):
+        """
+        Get the predicted action for a specific step.
+
+        Args:
+            step_idx (int): Index of the step to get action for (default: 0)
+
+        Returns:
+            dict: The predicted action
+        """
+        step_data = self.dataset[step_idx]
+        predicted_action = self.policy.get_action(step_data)
+        
+        print("\n=== Predicted Action ===")
+        for key, value in predicted_action.items():
+            if isinstance(value, np.ndarray):
+                print(f"{key}: shape={value.shape}, range=[{value.min():.3f}, {value.max():.3f}]")
+            else:
+                print(f"{key}: {type(value)}")
+        
+        return predicted_action
 
 
-## load the policy
-policy = Gr00tPolicy(
-    model_path=MODEL_PATH,
-    embodiment_tag=EMBODIMENT_TAG,
-    modality_config=modality_config,
-    modality_transform=modality_transform,
-    device=device,
-)
+def main():
+    # # strawberry
+    # evaluator = PolicyEvaluator(
+    #     model_path="./checkpoints/so100-checkpoints",
+    #     dataset_path=os.path.join(os.path.dirname(os.path.dirname(gr00t.__file__)), "demo_data/so100_strawberry_grape"),
+    #     embodiment_tag="so100",
+    #     data_config_name="so100",
+    #     video_backend="torchvision_av"
+    # )
 
-print("\n=== Policy Configuration ===")
-print("Model:", policy.model)
-print("\nModality Config Keys:", modality_config.keys())
-
-print("\n=== Modality Config Details ===")
-for key, value in modality_config.items():
-    if isinstance(value, np.ndarray):
-        print(f"{key}: shape={value.shape}")
-    else:
-        print(f"{key}: {value}")
+    # libero
+    evaluator = PolicyEvaluator(
+        model_path="./checkpoints/libero-object-checkpoints",
+        dataset_path=os.path.join(os.path.dirname(os.path.dirname(gr00t.__file__)), "demo_data/libero_object_data"),
+        embodiment_tag="libero_arm",
+        data_config_name="custom_panda_hand",
+        video_backend="torchvision_av"
+    )
 
 
-## Load the dataset
-dataset = LeRobotSingleDataset(
-    dataset_path=DATASET_PATH,
-    modality_configs=modality_config,
-    video_backend="torchvision_av",
-    video_backend_kwargs=None,
-    transforms=None,  # We'll handle transforms separately through the policy
-    embodiment_tag=EMBODIMENT_TAG,
-)
+    # Print configurations and requirements
+    evaluator.print_configuration()
+    evaluator.print_step_data()
+    evaluator.get_action()
+    # evaluator.compare_results_so100()
+    evaluator.compare_results_libero()
 
-step_data = dataset[0]
-print("\n=== Step Data Contents ===")
-print("Keys:", step_data.keys())
-for key, value in step_data.items():
-    if isinstance(value, np.ndarray):
-        print(f"\n{key}:")
-        print(f"  Shape: {value.shape}")
-        print(f"  Type: {value.dtype}")
-        print(f"  Range: [{value.min():.3f}, {value.max():.3f}]")
-        if value.size < 10:  # Only print small arrays
-            print(f"  Values: {value}")
-    else:
-        print(f"\n{key}:")
-        print(f"  Type: {type(value)}")
-        if isinstance(value, list) and len(value) < 10:
-            print(f"  Values: {value}")
-
-print("\n=== Model Input Requirements ===")
-print("The GR00T model expects input with the following keys:")
-print("1. Video data (e.g., 'video.agentview_rgb'):")
-print("   - Shape: (T, H, W, C) where T=1 for single frame")
-print("   - Type: uint8")
-print("   - Range: [0, 255]")
-print("\n2. State data (e.g., 'state.single_arm', 'state.gripper'):")
-print("   - Shape: (T, D) where T=1 for single timestep")
-print("   - Type: float32")
-print("   - Contains robot state information")
-print("\n3. Language data (e.g., 'annotation.human.task_description'):")
-print("   - Type: str or int")
-print("   - Contains task description or instruction")
-
-predicted_action = policy.get_action(step_data)
-print("\n=== Predicted Action ===")
-for key, value in predicted_action.items():
-    if isinstance(value, np.ndarray):
-        print(f"{key}: shape={value.shape}, range=[{value.min():.3f}, {value.max():.3f}]")
-    else:
-        print(f"{key}: {type(value)}")
+if __name__ == "__main__":
+    main()
