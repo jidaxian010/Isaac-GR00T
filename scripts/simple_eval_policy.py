@@ -88,6 +88,7 @@ class PolicyEvaluator:
         """
         step_data = self.dataset[step_idx]
         print("\n=== Step Data Contents ===")
+        print("total number of steps",len(self.dataset))
         print("Keys:", step_data.keys())
         for key, value in step_data.items():
             if isinstance(value, np.ndarray):
@@ -170,8 +171,7 @@ class PolicyEvaluator:
         gt_all_actions_list = []
         predicted_all_actions_list = []
         joint_states_list = []
-        print(len(self.dataset))
-        for i in range(200):
+        for i in range(132): # 132 is the number of steps in the dataset
             step_data = self.dataset[i]
             gt_all_actions = step_data["action.all_actions"]
             predicted_all_actions = self.policy.get_action(step_data)["action.all_actions"]

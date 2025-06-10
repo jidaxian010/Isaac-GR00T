@@ -675,7 +675,7 @@ class Gr1ArmsWaistDataConfig(Gr1ArmsOnlyDataConfig):
 ###########################################################################################
 
 class PandaHandDataConfig(BaseDataConfig): # libero panda hand 
-    video_keys = ["video.agentview_rgb"]
+    video_keys = ["video.agentview_rgb", "video.eye_in_hand_rgb"]
     state_keys = [
         "state.ee_pos",
         "state.ee_ori",
