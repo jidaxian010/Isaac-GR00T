@@ -3,6 +3,7 @@ import torch
 import gr00t
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 from gr00t.data.dataset import LeRobotSingleDataset
 from gr00t.model.policy import Gr00tPolicy
 from gr00t.experiment.data_config import DATA_CONFIG_MAP
@@ -16,7 +17,8 @@ class PolicyEvaluator:
         embodiment_tag: str,
         data_config_name: str,
         video_backend: str,
-        device: str = None
+        device: str = None,
+        num_episodes: int = None
     ):
         """
         Initialize the policy evaluator.
@@ -28,6 +30,7 @@ class PolicyEvaluator:
             data_config_name (str): Name of the data configuration from DATA_CONFIG_MAP
             video_backend (str): Backend to use for video loading
             device (str): Device to run the model on (default: "cuda" if available, else "cpu")
+            num_episodes (int): Number of episodes to use (default: None, which means all episodes)
         """
         self.repo_path = os.path.dirname(os.path.dirname(gr00t.__file__))
         self.model_path = model_path
@@ -35,6 +38,7 @@ class PolicyEvaluator:
         self.embodiment_tag = embodiment_tag
         self.video_backend = video_backend
         self.device = device if device is not None else ("cuda" if torch.cuda.is_available() else "cpu")
+        self.num_episodes = num_episodes
 
         # Load data configuration
         self.data_config = DATA_CONFIG_MAP[data_config_name]
@@ -115,7 +119,7 @@ class PolicyEvaluator:
         predicted_gripper_list = []
         
 
-        for i in range(80):
+        for i in range(self.num_episodes):
             step_data = self.dataset[i]
             gt_arm = step_data["action.single_arm"]  # dim = 5
             gt_gripper = step_data["action.gripper"]  # dim = 1
@@ -240,18 +244,19 @@ def main():
 
     # libero
     evaluator = PolicyEvaluator(
-        model_path="./checkpoints/libero-object-checkpoints",
+        model_path="./checkpoints/checkpoint-first",
         dataset_path=os.path.join(os.path.dirname(os.path.dirname(gr00t.__file__)), "demo_data/libero_object_data"),
         embodiment_tag="libero_arm",
         data_config_name="custom_panda_hand",
-        video_backend="torchvision_av"
+        video_backend="torchvision_av",
+        num_episodes=132  
     )
-
 
     # Print configurations and requirements
     evaluator.print_configuration()
     evaluator.print_step_data()
     evaluator.get_action()
+    
     # evaluator.compare_results_so100()
     evaluator.compare_results_libero()
 
