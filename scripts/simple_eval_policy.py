@@ -4,10 +4,11 @@ import gr00t
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+import time
+
 from gr00t.data.dataset import LeRobotSingleDataset
 from gr00t.model.policy import Gr00tPolicy
 from gr00t.experiment.data_config import DATA_CONFIG_MAP
-
 
 class PolicyEvaluator:
     def __init__(
@@ -39,6 +40,7 @@ class PolicyEvaluator:
         self.video_backend = video_backend
         self.device = device if device is not None else ("cuda" if torch.cuda.is_available() else "cpu")
         self.num_episodes = num_episodes
+        self.action_horizon = 16
 
         # Load data configuration
         self.data_config = DATA_CONFIG_MAP[data_config_name]
@@ -172,24 +174,42 @@ class PolicyEvaluator:
         Compare the predicted action with the ground truth action.
         Creates subplots for each joint (5 arm joints + 1 gripper).
         """
+        action_horizon = self.action_horizon
         gt_all_actions_list = []
         predicted_all_actions_list = []
+        predicted_action_chunk_list = []
         joint_states_list = []
-        for i in range(132): # 132 is the number of steps in the dataset
-            step_data = self.dataset[i]
+        for time_step in range(self.num_episodes):   # 132 is the number of steps in the dataset for the first task
+            # Inference at each timestep
+            step_data = self.dataset[time_step]
             gt_all_actions = step_data["action.all_actions"]
             predicted_all_actions = self.policy.get_action(step_data)["action.all_actions"]
 
             gt_all_actions_list.append(gt_all_actions[0])
             predicted_all_actions_list.append(predicted_all_actions[0])
             joint_states_list.append(step_data["state.joint_states"][0])
+            
+            
+            # Inference at every 16 steps
 
+            if time_step % action_horizon == 0:
+                print("inferencing at step: ", time_step)
+                action_chunk = self.policy.get_action(step_data)["action.all_actions"]
+                for j in range(action_horizon):
+                    predicted_action = action_chunk[j]
+                    predicted_action_chunk_list.append(predicted_action)
+
+
+
+        # Convert lists to numpy arrays
         gt_all_actions_array = np.array(gt_all_actions_list)
         predicted_all_actions_array = np.array(predicted_all_actions_list)
         joint_states_array = np.array(joint_states_list)
+        predicted_action_chunk_array = np.array(predicted_action_chunk_list)
         # print
         print("its the action shape",gt_all_actions_array.shape)
         print("its the state shape",joint_states_array.shape)
+        print("its the predicted action chunk shape",predicted_action_chunk_array.shape)
         # Create subplots for each joint
         joint_names = ['Joint 1', 'Joint 2', 'Joint 3', 'Joint 4', 'Joint 5', 'Joint 6', 'Joint 7']
         fig, axs = plt.subplots(4, 2, figsize=(15, 15))
@@ -200,6 +220,7 @@ class PolicyEvaluator:
             axs[i].plot(gt_all_actions_array[:, i], label='Ground Truth', color='blue')
             axs[i].plot(predicted_all_actions_array[:, i], label='Predicted', color='red', linestyle='--')
             axs[i].plot(joint_states_array[:, i], label='Joint States', color='green')
+            axs[i].plot(predicted_action_chunk_array[:, i], label='Predicted Action Chunk', color='black', linestyle='--')
             axs[i].set_title(f'{joint_names[i]}')
             axs[i].set_xlabel('Time Step')
             axs[i].set_ylabel('Joint Value')
@@ -231,6 +252,54 @@ class PolicyEvaluator:
         
         return predicted_action
 
+    def save_predicted_actions_to_parquet(self):
+        """
+        Save all predicted actions for all timesteps to a parquet file.
+        The file will contain:
+        - timestep: The timestep index
+        - episode_id: The episode ID
+        - predicted_actions: The predicted actions from the model
+        - ground_truth_actions: The ground truth actions from the dataset
+        - joint_states: The joint states from the dataset
+        """
+        # Lists to store data
+        timesteps = []
+        episode_ids = []
+        predicted_actions = []
+        
+        
+        # Get data for all timesteps
+        for i in range(self.num_episodes):
+            step_data = self.dataset[i]
+            trajectory_id, base_index = self.dataset.all_steps[i]
+            
+            # Get predicted action
+            action = self.policy.get_action(step_data)
+            predicted_action = action["action.all_actions"][0]  # Get first element from batch
+            
+            
+            
+            # Store data
+            timesteps.append(i)
+            episode_ids.append(trajectory_id)
+            predicted_actions.append(predicted_action)
+           
+        
+        # Create DataFrame
+        df = pd.DataFrame({
+            'timestep': timesteps,
+            'episode_id': episode_ids,
+            'predicted_actions': predicted_actions,
+        })
+        
+        # Save to parquet file
+        timestamp = int(time.time())
+        output_file = f'predicted_actions_{timestamp}.parquet'
+        df.to_parquet(output_file)
+        print(f"Successfully saved predicted actions to {output_file}")
+        
+        return df
+
 
 def main():
     # # strawberry
@@ -259,6 +328,8 @@ def main():
     
     # evaluator.compare_results_so100()
     evaluator.compare_results_libero()
+    
+    # evaluator.save_predicted_actions_to_parquet()
 
 if __name__ == "__main__":
     main()
