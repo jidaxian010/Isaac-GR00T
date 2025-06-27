@@ -455,14 +455,26 @@ class FlowmatchingActionHead(nn.Module):
             timestep=t_discretized,
         )
         pred = self.action_decoder_small(model_output, embodiment_id)
-        pred_actions = pred[:, -self.action_horizon :]
+        pred_actions = pred[:, 1:, :] # (B, 4, 7) only the action part, avoid state pred at 0
+
 
         # Slice out only the action portion of pred and target.
         action_mask = action_input.action_mask
         # Extract only the first 4 timesteps for loss computation
         velocity_4 = velocity[:, :self.action_horizon, :]  # (B, 4, 7)
         action_mask_4 = action_mask[:, :self.action_horizon, :]  # (B, 4, 7)
-        
+
+        # # Debug prints to understand shapes
+        # print(f"DEBUG - pre shape: {pred.shape}")
+        # print(f"DEBUG - pred_actions shape: {pred_actions.shape}")
+        # print(f"DEBUG - velocity_4 shape: {velocity_4.shape}")
+        # print(f"DEBUG - action_mask_4 shape: {action_mask_4.shape}")
+        # print(f"DEBUG - self.action_horizon: {self.action_horizon}")
+        # print(f"DEBUG - self.config.action_dim: {self.config.action_dim}")
+        # print(f"DEBUG - actions.shape: {actions.shape}")
+
+
+
         loss = F.mse_loss(pred_actions, velocity_4, reduction="none") * action_mask_4
         loss = loss.sum() / action_mask_4.sum()
         output_dict = {
