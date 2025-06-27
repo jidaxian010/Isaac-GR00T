@@ -91,15 +91,37 @@ class CategorySpecificMLP(nn.Module):
 class AdaptiveActionDecoder(nn.Module):
     def __init__(self, original_decoder, target_seq_length):
         super().__init__()
-        self.original_decoder = original_decoder
+        # Create a completely new decoder with fresh parameters
+        # Get the correct dimensions from the original decoder
+        num_categories = original_decoder.num_categories
+        input_dim = original_decoder.layer1.W.shape[1]  # input_dim from W1
+        hidden_dim = original_decoder.layer1.W.shape[2]  # hidden_dim from W1
+        output_dim = original_decoder.layer2.W.shape[2]  # output_dim from W2
+        
+        # Create a new CategorySpecificMLP with fresh parameters
+        self.new_decoder = CategorySpecificMLP(
+            num_categories=num_categories,
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            output_dim=output_dim,
+        )
+        
+        # Initialize the new decoder with small random weights
+        # This ensures it starts from scratch and can be trained independently
+        for param in self.new_decoder.parameters():
+            if param.dim() > 1:
+                nn.init.xavier_uniform_(param)
+            else:
+                nn.init.zeros_(param)
+        
         self.target_seq_length = target_seq_length
         
     def forward(self, model_output, embodiment_id):
         # model_output: (B, 17, 1024) - from DiT
-        # original_decoder: outputs (B, 17, 7)
+        # new_decoder: outputs (B, 17, 7) with fresh parameters
         
-        # Get full prediction from original decoder
-        pred_full = self.original_decoder(model_output, embodiment_id)  # (B, 17, 7)
+        # Get full prediction from new decoder
+        pred_full = self.new_decoder(model_output, embodiment_id)  # (B, 17, 7)
         
         # Extract only the first 5 timesteps (1 state + 4 action)
         pred_small = pred_full[:, :self.target_seq_length, :]  # (B, 5, 7)
@@ -287,129 +309,6 @@ class FlowmatchingActionHead(nn.Module):
     def prepare_input(self, batch: dict) -> BatchFeature:
         return BatchFeature(data=batch)
 
-    # def forward(self, backbone_output: BatchFeature, action_input: BatchFeature) -> BatchFeature:
-    #     # Set frozen modules to eval
-    #     self.set_frozen_modules_to_eval_mode()
-
-    #     # Get vision and language embeddings.
-    #     vl_embeds = backbone_output.backbone_features
-    #     device = vl_embeds.device
-
-    #     # Get embodiment ID.
-    #     embodiment_id = action_input.embodiment_id
-
-    #     # Embed state.
-    #     state_features = self.state_encoder(action_input.state, embodiment_id)
-
-    #     # Embed noised action trajectory.
-    #     actions = action_input.action
-    #     noise = torch.randn(actions.shape, device=actions.device, dtype=actions.dtype)
-    #     t = self.sample_time(actions.shape[0], device=actions.device, dtype=actions.dtype)
-    #     t = t[:, None, None]  # shape (B,1,1) for broadcast
-
-    #     noisy_trajectory = (1 - t) * noise + t * actions
-    #     velocity = actions - noise
-
-    #     # Convert (continuous) t -> discrete if needed
-    #     t_discretized = (t[:, 0, 0] * self.num_timestep_buckets).long()
-    #     action_features = self.action_encoder(noisy_trajectory, t_discretized, embodiment_id)
-
-    #     # Maybe add position embedding.
-    #     if self.config.add_pos_embed:
-    #         pos_ids = torch.arange(action_features.shape[1], dtype=torch.long, device=device)
-    #         pos_embs = self.position_embedding(pos_ids).unsqueeze(0)
-    #         action_features = action_features + pos_embs
-
-    #     # Join vision, language, state and action embedding along sequence dimension.
-    #     sa_embs = torch.cat((state_features, action_features), dim=1)
-    #     vl_embs = vl_embeds
-    #     vl_attn_mask = backbone_output.backbone_attention_mask
-
-    #     model_output = self.model(
-    #         hidden_states=sa_embs,
-    #         encoder_hidden_states=vl_embs,
-    #         encoder_attention_mask=vl_attn_mask,
-    #         timestep=t_discretized,
-    #     )
-    #     pred = self.action_decoder(model_output, embodiment_id)
-    #     pred_actions = pred[:, -actions.shape[1] :]
-
-    #     # Slice out only the action portion of pred and target.
-    #     action_mask = action_input.action_mask
-    #     loss = F.mse_loss(pred_actions, velocity, reduction="none") * action_mask
-    #     loss = loss.sum() / action_mask.sum()
-    #     output_dict = {
-    #         "loss": loss,
-    #     }
-    #     return BatchFeature(data=output_dict)
-
-
-    # @torch.no_grad()
-    # def get_action(self, backbone_output: BatchFeature, action_input: BatchFeature) -> BatchFeature:
-    #     # Get vision and language embeddings.
-    #     vl_embeds = backbone_output.backbone_features
-    #     embodiment_id = action_input.embodiment_id
-
-    #     # Embed state.
-    #     state_features = self.state_encoder(action_input.state, embodiment_id)
-
-    #     # Set initial actions as the sampled noise.
-    #     batch_size = vl_embeds.shape[0]
-    #     device = vl_embeds.device
-    #     actions = torch.randn(
-    #         size=(batch_size, self.config.action_horizon, self.config.action_dim),
-    #         dtype=vl_embeds.dtype,
-    #         device=device,
-    #     )
-
-    #     num_steps = self.num_inference_timesteps
-    #     dt = 1.0 / num_steps
-
-    #     # Run denoising steps.
-    #     for t in range(num_steps):
-    #         t_cont = t / float(num_steps)  # e.g. goes 0, 1/N, 2/N, ...
-    #         t_discretized = int(t_cont * self.num_timestep_buckets)
-
-    #         # Embed noised action trajectory.
-    #         timesteps_tensor = torch.full(
-    #             size=(batch_size,), fill_value=t_discretized, device=device
-    #         )
-    #         action_features = self.action_encoder(actions, timesteps_tensor, embodiment_id)
-    #         # Maybe add position embedding.
-    #         if self.config.add_pos_embed:
-    #             pos_ids = torch.arange(action_features.shape[1], dtype=torch.long, device=device)
-    #             pos_embs = self.position_embedding(pos_ids).unsqueeze(0)
-    #             action_features = action_features + pos_embs
-
-    #         vl_embs = vl_embeds
-
-    #         # Join vision, language, state and action embedding along sequence dimension.
-    #         sa_embs = torch.cat((state_features, action_features), dim=1)
-
-    #         # Run model forward.
-    #         model_output = self.model(
-    #             hidden_states=sa_embs,
-    #             encoder_hidden_states=vl_embs,
-    #             timestep=timesteps_tensor,
-    #         )
-    #         pred = self.action_decoder(model_output, embodiment_id)
-
-    #         pred_velocity = pred[:, -self.action_horizon :]
-
-    #         # Update actions using euler integration.
-    #         actions = actions + dt * pred_velocity
-    #     return BatchFeature(data={"action_pred": actions})
-
-    # @property
-    # def device(self):
-    #     return next(iter(self.parameters())).device
-
-    # @property
-    # def dtype(self):
-    #     return next(iter(self.parameters())).dtype
-
-
-
     def forward(self, backbone_output: BatchFeature, action_input: BatchFeature) -> BatchFeature:
         # Set frozen modules to eval
         self.set_frozen_modules_to_eval_mode()
@@ -463,17 +362,6 @@ class FlowmatchingActionHead(nn.Module):
         # Extract only the first 4 timesteps for loss computation
         velocity_4 = velocity[:, :self.action_horizon, :]  # (B, 4, 7)
         action_mask_4 = action_mask[:, :self.action_horizon, :]  # (B, 4, 7)
-
-        # # Debug prints to understand shapes
-        # print(f"DEBUG - pre shape: {pred.shape}")
-        # print(f"DEBUG - pred_actions shape: {pred_actions.shape}")
-        # print(f"DEBUG - velocity_4 shape: {velocity_4.shape}")
-        # print(f"DEBUG - action_mask_4 shape: {action_mask_4.shape}")
-        # print(f"DEBUG - self.action_horizon: {self.action_horizon}")
-        # print(f"DEBUG - self.config.action_dim: {self.config.action_dim}")
-        # print(f"DEBUG - actions.shape: {actions.shape}")
-
-
 
         loss = F.mse_loss(pred_actions, velocity_4, reduction="none") * action_mask_4
         loss = loss.sum() / action_mask_4.sum()
