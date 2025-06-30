@@ -88,45 +88,54 @@ class CategorySpecificMLP(nn.Module):
         return self.layer2(hidden, cat_ids)
 
 
-class AdaptiveActionDecoder(nn.Module):
-    def __init__(self, original_decoder, target_seq_length):
+class CategorySpecificSequenceMLP(nn.Module):
+    def __init__(self,
+                 num_categories,
+                 seq_length,
+                 hidden_dim,           # input_dim (x: (B, T, hidden_dim))
+                 target_seq_length,    # new sequence length
+                 action_dim,           # output dimension
+                 mid_dim               # middle layer dimension
+                ):
         super().__init__()
-        # Create a completely new decoder with fresh parameters
-        # Get the correct dimensions from the original decoder
-        num_categories = original_decoder.num_categories
-        input_dim = original_decoder.layer1.W.shape[1]  # input_dim from W1
-        hidden_dim = original_decoder.layer1.W.shape[2]  # hidden_dim from W1
-        output_dim = original_decoder.layer2.W.shape[2]  # output_dim from W2
-        
-        # Create a new CategorySpecificMLP with fresh parameters
-        self.new_decoder = CategorySpecificMLP(
-            num_categories=num_categories,
-            input_dim=input_dim,
-            hidden_dim=hidden_dim,
-            output_dim=output_dim,
-        )
-        
-        # Initialize the new decoder with small random weights
-        # This ensures it starts from scratch and can be trained independently
-        for param in self.new_decoder.parameters():
-            if param.dim() > 1:
-                nn.init.xavier_uniform_(param)
-            else:
-                nn.init.zeros_(param)
-        
+        self.seq_length = seq_length
+        self.hidden_dim = hidden_dim
         self.target_seq_length = target_seq_length
-        
-    def forward(self, model_output, embodiment_id):
-        # model_output: (B, 17, 1024) - from DiT
-        # new_decoder: outputs (B, 17, 7) with fresh parameters
-        
-        # Get full prediction from new decoder
-        pred_full = self.new_decoder(model_output, embodiment_id)  # (B, 17, 7)
-        
-        # Extract only the first 5 timesteps (1 state + 4 action)
-        pred_small = pred_full[:, :self.target_seq_length, :]  # (B, 5, 7)
-        
-        return pred_small
+        self.action_dim = action_dim
+        self.mid_dim = mid_dim
+
+        # First cat-specific linear: (T*H) → M
+        self.layer1 = CategorySpecificLinear(
+            num_categories,
+            input_dim  = seq_length * hidden_dim,
+            hidden_dim = mid_dim
+        )
+        # Second cat-specific linear: M → (T2*O)
+        self.layer2 = CategorySpecificLinear(
+            num_categories,
+            input_dim  = mid_dim,
+            hidden_dim = target_seq_length * action_dim
+        )
+
+    def forward(self, x, cat_ids):
+        B = x.size(0)
+        # 1) flatten time+feature: → (B, T*H)
+        x_flat = x.reshape(B, -1)
+        # 2) pretend it’s a length-1 sequence: → (B, 1, T*H)
+        x_seq = x_flat.unsqueeze(1)
+
+        # 3) layer 1 + activation: (B,1,T*H) → (B,1,M)
+        h_seq = F.relu(self.layer1(x_seq, cat_ids))
+
+        # 4) layer 2: (B,1,M) → (B,1,T2*O)
+        out_seq = self.layer2(h_seq, cat_ids)
+
+        # 5) collapse + reshape → (B, T2, O)
+        out_flat = out_seq.squeeze(1)
+        return out_flat.view(B, self.target_seq_length, self.action_dim)
+
+
+
 
 
 class MultiEmbodimentActionEncoder(nn.Module):
@@ -250,10 +259,35 @@ class FlowmatchingActionHead(nn.Module):
             hidden_dim=self.hidden_size,
             output_dim=self.action_dim,
         )
-        self.action_decoder_small = AdaptiveActionDecoder(
-            self.action_decoder, 
-            target_seq_length=self.action_horizon + 1
+        self.action_decoder_adaptive = CategorySpecificSequenceMLP(
+            num_categories=config.max_num_embodiments,
+            seq_length=config.max_seq_len, # 17
+            hidden_dim=self.hidden_size,
+            target_seq_length=self.action_horizon,
+            action_dim=self.action_dim,
+            mid_dim=self.hidden_size,
         )
+        
+        # # Print parameter shapes for debugging
+        # print("\n" + "="*50)
+        # print("CATEGORYSPECIFICSEQUENCEMLP PARAMETER SHAPES")
+        # print("="*50)
+        # print(f"Input: (B, 17, 1024) -> Flattened: (B, 17*1024) = (B, 17408)")
+        # print(f"Layer 1: (17408 -> 1024)")
+        # print(f"Layer 2: (1024 -> 4*7) = (1024 -> 28)")
+        # print(f"Output: (B, 4, 7)")
+        
+        # Print actual parameter shapes
+        adaptive_decoder = self.action_decoder_adaptive
+        print(f"\nLayer 1 W shape: {adaptive_decoder.layer1.W.shape}")
+        print(f"Layer 1 b shape: {adaptive_decoder.layer1.b.shape}")
+        print(f"Layer 2 W shape: {adaptive_decoder.layer2.W.shape}")
+        print(f"Layer 2 b shape: {adaptive_decoder.layer2.b.shape}")
+        
+        # Calculate total parameters
+        total_params = sum(p.numel() for p in adaptive_decoder.parameters())
+        print(f"Total parameters in CategorySpecificSequenceMLP: {total_params:,}")
+        print("="*50 + "\n")
         
         if config.add_pos_embed:
             self.position_embedding = nn.Embedding(config.max_seq_len, self.input_embedding_dim)
@@ -353,9 +387,9 @@ class FlowmatchingActionHead(nn.Module):
             encoder_attention_mask=vl_attn_mask,
             timestep=t_discretized,
         )
-        pred = self.action_decoder_small(model_output, embodiment_id)
-        pred_actions = pred[:, 1:, :] # (B, 4, 7) only the action part, avoid state pred at 0
-
+        pred = self.action_decoder_adaptive(model_output, embodiment_id)
+        # pred should be (B, 4, 7) - 4 action timesteps directly
+        pred_actions = pred  # No need to slice, already 4 timesteps
 
         # Slice out only the action portion of pred and target.
         action_mask = action_input.action_mask
@@ -419,10 +453,16 @@ class FlowmatchingActionHead(nn.Module):
                 encoder_hidden_states=vl_embs,
                 timestep=timesteps_tensor,
             )
-            pred = self.action_decoder_small(model_output, embodiment_id)
+            pred = self.action_decoder_adaptive(model_output, embodiment_id)
+            
+            # Debug prints to verify shapes
+            print(f"DEBUG - pred shape: {pred.shape}")
+            print(f"DEBUG - self.action_horizon: {self.action_horizon}")
+            print(f"DEBUG - pred[:, -self.action_horizon:].shape: {pred[:, -self.action_horizon:].shape}")
 
-            pred_velocity = pred[:, -self.action_horizon :]
-
+            # Fix: Use the correct action horizon from the adaptive decoder
+            # pred_velocity = pred[:, -self.action_horizon :]
+            pred_velocity = pred
             # Update actions using euler integration.
             actions = actions + dt * pred_velocity
         return BatchFeature(data={"action_pred": actions})

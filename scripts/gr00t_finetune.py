@@ -134,7 +134,7 @@ def main(config: Config):
         video_backend=config.video_backend,
     )
 
-    # ------------ step 2: load model ------------
+    # 1.2 load model
     model = GR00T_N1.from_pretrained(
         pretrained_model_name_or_path=config.base_model_path,
         tune_llm=config.tune_llm,  # backbone's LLM
@@ -142,6 +142,14 @@ def main(config: Config):
         tune_projector=config.tune_projector,  # action head's projector
         tune_diffusion_model=config.tune_diffusion_model,  # action head's DiT
     )
+    
+    # Update model configuration to match your 4-timestep training
+    model.config.action_horizon = 4
+    model.action_head.action_horizon = 4
+    model.action_head.config.action_horizon = 4
+    print(f"Updated model action_horizon to: {model.config.action_horizon}")
+    
+    # 1.3 set trainable parameters
 
     # Set the model's compute_dtype to bfloat16
     model.compute_dtype = "bfloat16"
