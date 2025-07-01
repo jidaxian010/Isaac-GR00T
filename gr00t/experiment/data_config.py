@@ -687,7 +687,7 @@ class PandaHandDataConfig(BaseDataConfig): # libero panda hand
 
     language_keys = ["annotation.human.action.task_description"]
     observation_indices = [0]
-    action_indices = list(range(16))
+    action_indices = list(range(4))
 
     def modality_config(self):
         video_modality = ModalityConfig(

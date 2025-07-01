@@ -245,6 +245,9 @@ class FlowmatchingActionHead(nn.Module):
         print("input_embedding_dim", self.input_embedding_dim)
         print("action_dim", self.action_dim)
         print("action_horizon", self.action_horizon)
+        print("dataconfig action_dim", self.config.action_dim)
+        print("dataconfig action_horizon", self.config.action_horizon)
+
         print("num_inference_timesteps", self.num_inference_timesteps)
         print("num_timestep_buckets", self.num_timestep_buckets)
         
