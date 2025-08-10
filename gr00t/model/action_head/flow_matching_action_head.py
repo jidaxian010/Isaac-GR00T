@@ -155,6 +155,12 @@ class FlowmatchingActionHeadConfig(PretrainedConfig):
     num_target_vision_tokens: int = field(
         default=32, metadata={"help": "Number of target vision tokens."}
     )
+    inference_rtc_steps: int = field(
+        default=None, metadata={"help": "Real-time chunking steps for inference."}
+    )
+    inference_rtc_freeze_steps: int = field(
+        default=None, metadata={"help": "Real-time chunking freeze steps for inference."}
+    )
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -258,7 +264,8 @@ class FlowmatchingActionHead(nn.Module):
 
     def sample_time(self, batch_size, device, dtype):
         sample = self.beta_dist.sample([batch_size]).to(device, dtype=dtype)
-        return (self.config.noise_s - sample) / self.config.noise_s
+        # return self.config.noise_s * (1 - sample)  # NOTE(YL): proposed fix
+        return (self.config.noise_s - sample) / self.config.noise_s  # original in gr00t
 
     def prepare_input(self, batch: dict) -> BatchFeature:
         return BatchFeature(data=batch)
@@ -344,6 +351,18 @@ class FlowmatchingActionHead(nn.Module):
         action_mask = action_input.action_mask
         loss = F.mse_loss(pred_actions, velocity, reduction="none") * action_mask
         loss = loss.sum() / action_mask.sum()
+
+        # NOTE(YL): youliang's experiments
+        # base = F.mse_loss(pred_actions, velocity, reduction="none") * action_mask
+        # base = base.sum() / action_mask.sum()
+
+        # # 2) finite‐difference acceleration
+        # vel_diff = pred_actions[:, 1:] - pred_actions[:, :-1]          # (B, T-1, D)
+        # acc_loss = vel_diff.pow(2).mean()                              # scalar
+
+        # # 3) combine
+        # λ_acc = 0.01
+        # loss = base + λ_acc * acc_loss
         output_dict = {
             "loss": loss,
         }
@@ -369,6 +388,21 @@ class FlowmatchingActionHead(nn.Module):
             dtype=vl_embs.dtype,
             device=device,
         )
+
+        # Real-time chunking. NOTE(YL): simple implementation of RTC, can be improved with better guidance impl
+        # this treats the action sequence as a in-painting problem, if the inference_rtc_size is provided, we will take
+        # the "action" from the action_input and take the last inference_rtc_size steps as the initial actions
+        use_rtc = False
+        if self.config.inference_rtc_steps is not None and "action" in action_input.keys():
+            assert (
+                "action" in action_input.keys()
+            ), "action must be in action_input when using Realtime chunking"
+            # take the last prior action [batch, inference_rtc_steps, action_dim] and move it as the first inference_rtc_steps steps
+            actions[:, : self.config.inference_rtc_steps, :] = action_input["action"][
+                :, -self.config.inference_rtc_steps :, :
+            ]
+            print("\033[93m", "Use Realtime chunking in-painting", "\033[0m")
+            use_rtc = True
 
         num_steps = self.num_inference_timesteps
         dt = 1.0 / num_steps
@@ -403,8 +437,17 @@ class FlowmatchingActionHead(nn.Module):
 
             pred_velocity = pred[:, -self.action_horizon :]
 
+            # set the vel strength shape same as pred_velocity above, with all default 1.0. "inverse guidance"
+            vel_strength = torch.ones_like(pred_velocity)
+
+            # set all non-inpainting portion with vel_strength as 0
+            if use_rtc:
+                # we will only freeze the freeze steps, which is the entire e2e forward pass time.
+                vel_strength[:, : self.config.inference_rtc_freeze_steps, :] = 0.0
+                # TODO: use a decay strength to set the remaining unfrozen rtc_steps
+
             # Update actions using euler integration.
-            actions = actions + dt * pred_velocity
+            actions = actions + dt * pred_velocity * vel_strength
         return BatchFeature(data={"action_pred": actions})
 
     @property

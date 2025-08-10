@@ -42,34 +42,47 @@ def calc_mse_for_single_trajectory(
     steps=300,
     action_horizon=16,
     plot=False,
+    plot_state=False,
     save_plot_path=None,
 ):
     state_joints_across_time = []
     gt_action_across_time = []
     pred_action_across_time = []
 
-    for step_count in range(steps):
-        data_point = dataset.get_step_data(traj_id, step_count)
+    prev_action = None
 
+    for step_count in range(steps):
+        # data_point = dataset.get_step_data(traj_id, step_count)
         # NOTE this is to get all modality keys concatenated
-        # concat_state = data_point[f"state.{modality_keys[0]}"][0]
-        # # concat_gt_action = data_point[f"action.{modality_keys[0]}"][0]
-        concat_gt_action = np.concatenate(
-            [data_point[f"action.{key}"][0] for key in modality_keys], axis=0
-        )
-        gt_action_across_time.append(concat_gt_action)
-        try:
+        if plot_state:
             concat_state = np.concatenate(
                 [data_point[f"state.{key}"][0] for key in modality_keys], axis=0
             )
             state_joints_across_time.append(concat_state)
-        except KeyError as e:
-            print(f"KeyError concatenating state: {e}, we will skip plotting state")
 
         if step_count % action_horizon == 0:
+            data_point = dataset.get_step_data(traj_id, step_count)
+
+            # TODO: hack all actions in the data_point to be the same as the previous action
+            # remove action.*** from data_point to new_data_point
+            new_data_point = {k: v for k, v in data_point.items() if not k.startswith("action.")}
+
             print("inferencing at step: ", step_count)
-            action_chunk = policy.get_action(data_point)
+            # This is used by RTC
+            if prev_action is not None:
+                # combine dict of prev_action and new_data_point
+                # add one dimension to prev_action
+                new_data_point = {**prev_action, **new_data_point}
+
+            action_chunk = policy.get_action(new_data_point)
+
+            prev_action = action_chunk
             for j in range(action_horizon):
+                concat_gt_action = np.concatenate(
+                    [data_point[f"action.{key}"][j] for key in modality_keys], axis=0
+                )
+                gt_action_across_time.append(concat_gt_action)
+
                 # NOTE: concat_pred_action = action[f"action.{modality_keys[0]}"][j]
                 # the np.atleast_1d is to ensure the action is a 1D array, handle where single value is returned
                 concat_pred_action = np.concatenate(
@@ -79,10 +92,12 @@ def calc_mse_for_single_trajectory(
                 pred_action_across_time.append(concat_pred_action)
 
     # plot the joints
-    state_joints_across_time = np.array(state_joints_across_time)
-    gt_action_across_time = np.array(gt_action_across_time)
+    state_joints_across_time = np.array(state_joints_across_time)[:steps]
+    gt_action_across_time = np.array(gt_action_across_time)[:steps]
     pred_action_across_time = np.array(pred_action_across_time)[:steps]
-    assert gt_action_across_time.shape == pred_action_across_time.shape
+    assert gt_action_across_time.shape == pred_action_across_time.shape, print(
+        gt_action_across_time.shape, pred_action_across_time.shape
+    )
 
     # calc MSE across time
     mse = np.mean((gt_action_across_time - pred_action_across_time) ** 2)

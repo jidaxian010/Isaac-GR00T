@@ -15,7 +15,7 @@
 
 import warnings
 from dataclasses import dataclass, field
-from typing import List, Literal
+from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
 import tyro
@@ -64,6 +64,9 @@ class ArgsConfig:
     trajs: int = 1
     """Number of trajectories to evaluate."""
 
+    start_traj: int = 0
+    """Start trajectory to evaluate."""
+
     action_horizon: int = None
     """Action horizon to evaluate. If None, will use the data config's action horizon."""
 
@@ -82,8 +85,38 @@ class ArgsConfig:
     denoising_steps: int = 4
     """Number of denoising steps to use."""
 
+    rtc_steps: Optional[int] = None
+    """How many prior chunk steps we use for the next inference (Total overlap steps)."""
+
+    rtc_freeze_steps: Optional[int] = None
+    """How many prior chunk steps we freeze for the next inference (Total get_action latency)."""
+
     save_plot_path: str = None
     """Path to save the plot."""
+
+    plot_state: bool = False
+    """Whether to show the state on the plot."""
+
+
+class WrapPolicy(BasePolicy):
+    def __init__(self, policy: BasePolicy):
+        self.policy = policy
+
+    def set_config(self, denoising_steps: int, rtc_steps: int, rtc_freeze_steps: int):
+        self.config = {
+            "denoising_steps": denoising_steps,
+            "rtc_steps": rtc_steps,
+            "rtc_freeze_steps": rtc_freeze_steps,
+        }
+
+    def get_action(
+        self, observations: Dict[str, Any], config: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        assert config is None, "config should be None as we are using default config"
+        return self.policy.get_action(observations, self.config)
+
+    def get_modality_config(self) -> Dict[str, "ModalityConfig"]:
+        return self.policy.get_modality_config()
 
 
 def main(args: ArgsConfig):
@@ -105,11 +138,18 @@ def main(args: ArgsConfig):
             modality_config=modality_config,
             modality_transform=modality_transform,
             embodiment_tag=args.embodiment_tag,
-            denoising_steps=args.denoising_steps,
             device="cuda" if torch.cuda.is_available() else "cpu",
         )
+        torch.manual_seed(42)  # Keep the same seed to ensure reproducibility
     else:
         policy: BasePolicy = RobotInferenceClient(host=args.host, port=args.port)
+
+    policy = WrapPolicy(policy)
+    policy.set_config(
+        denoising_steps=args.denoising_steps,
+        rtc_steps=args.rtc_steps,
+        rtc_freeze_steps=args.rtc_freeze_steps,
+    )
 
     # Get the supported modalities for the policy
     modality = policy.get_modality_config()
@@ -145,7 +185,7 @@ def main(args: ArgsConfig):
     print("Running on all trajs with modality keys:", args.modality_keys)
 
     all_mse = []
-    for traj_id in range(args.trajs):
+    for traj_id in range(args.start_traj, args.start_traj + args.trajs):
         print("Running trajectory:", traj_id)
         mse = calc_mse_for_single_trajectory(
             policy,
@@ -155,6 +195,7 @@ def main(args: ArgsConfig):
             steps=args.steps,
             action_horizon=args.action_horizon,
             plot=args.plot,
+            plot_state=args.plot_state,
             save_plot_path=args.save_plot_path,
         )
         print("MSE:", mse)
