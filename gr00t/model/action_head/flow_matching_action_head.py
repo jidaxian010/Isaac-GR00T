@@ -401,11 +401,19 @@ class FlowmatchingActionHead(nn.Module):
             actions[:, : self.config.inference_rtc_steps, :] = action_input["action"][
                 :, -self.config.inference_rtc_steps :, :
             ]
-            print("\033[93m", "Use Realtime chunking in-painting", "\033[0m")
             use_rtc = True
 
         num_steps = self.num_inference_timesteps
         dt = 1.0 / num_steps
+
+        vel_strength = torch.ones_like(actions)
+        if use_rtc:
+            # we will only freeze the freeze steps, which is the entire e2e forward pass time.
+            vel_strength[:, : self.config.inference_rtc_freeze_steps, :] = 0.0
+            # TODO: use a decay strength to set the remaining unfrozen rtc_steps
+            vel_strength[
+                :, self.config.inference_rtc_freeze_steps : self.config.inference_rtc_steps, :
+            ] = 0.6
 
         # Run denoising steps.
         for t in range(num_steps):
@@ -438,13 +446,13 @@ class FlowmatchingActionHead(nn.Module):
             pred_velocity = pred[:, -self.action_horizon :]
 
             # set the vel strength shape same as pred_velocity above, with all default 1.0. "inverse guidance"
-            vel_strength = torch.ones_like(pred_velocity)
+            # vel_strength = torch.ones_like(pred_velocity)
 
-            # set all non-inpainting portion with vel_strength as 0
-            if use_rtc:
-                # we will only freeze the freeze steps, which is the entire e2e forward pass time.
-                vel_strength[:, : self.config.inference_rtc_freeze_steps, :] = 0.0
-                # TODO: use a decay strength to set the remaining unfrozen rtc_steps
+            # # set all non-inpainting portion with vel_strength as 0
+            # if use_rtc:
+            #     # we will only freeze the freeze steps, which is the entire e2e forward pass time.
+            #     vel_strength[:, : self.config.inference_rtc_freeze_steps, :] = 0.0
+            #     # TODO: use a decay strength to set the remaining unfrozen rtc_steps
 
             # Update actions using euler integration.
             actions = actions + dt * pred_velocity * vel_strength
