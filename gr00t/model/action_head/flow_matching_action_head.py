@@ -161,6 +161,7 @@ class FlowmatchingActionHeadConfig(PretrainedConfig):
     inference_rtc_frozen_steps: int = field(
         default=None, metadata={"help": "Real-time chunking freeze steps for inference."}
     )
+    rtc_ramp_rate: float = field(default=6.0, metadata={"help": "Ramp rate for real-time chunking."})
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -416,7 +417,7 @@ class FlowmatchingActionHead(nn.Module):
             )
             # # Create exponential ramp from 0 to 1 over intermediate steps
             t = torch.linspace(0.0, 1.0, intermediate_steps + 2, device=device)
-            ramp = 1 - torch.exp(-3.0 * t)  # NOTE: this is a hyperparameter, can be tuned
+            ramp = 1 - torch.exp(-self.config.rtc_ramp_rate * t)
             ramp = ramp / ramp[-1].clamp_min(1e-8)  # normalize to [0,1]
             ramp = ramp[
                 1:-1

@@ -154,6 +154,7 @@ def calc_mse_for_single_trajectory(
             "inference_latency_steps": inference_latency_steps,
             "steps": steps,
             "chunk_pred_action": chunk_pred_action,
+            "rtc_enabled": rtc_enabled,
         }
         plot_trajectory(info, save_plot_path)
 
@@ -181,6 +182,7 @@ def plot_trajectory(
     steps = info["steps"]
     execution_horizon = info["execution_horizon"]
     inference_latency_steps = info["inference_latency_steps"]
+    rtc_enabled = info["rtc_enabled"]
 
     # Adjust figure size and spacing to accommodate titles
     fig, axes = plt.subplots(nrows=action_dim, ncols=1, figsize=(10, 4 * action_dim + 2))
@@ -196,8 +198,9 @@ def plot_trajectory(
     for key in modality_keys:
         modality_string += key + "\n " if len(modality_string) > 40 else key + ", "
     title_text = f"Trajectory Analysis - ID: {traj_id}\nModalities: {modality_string[:-2]}\nUnnormalized MSE: {mse:.6f}"
+    title_text += f"\nlatency steps: {inference_latency_steps} | execution horizon: {execution_horizon} | RTC: {rtc_enabled}"
 
-    fig.suptitle(title_text, fontsize=14, fontweight="bold", color="#2E86AB", y=0.95)
+    fig.suptitle(title_text, fontsize=14, fontweight="bold", color="#2E86AB", y=0.96)
 
     # Loop through each action dim
     for i, ax in enumerate(axes):
