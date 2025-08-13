@@ -155,10 +155,10 @@ class FlowmatchingActionHeadConfig(PretrainedConfig):
     num_target_vision_tokens: int = field(
         default=32, metadata={"help": "Number of target vision tokens."}
     )
-    inference_rtc_steps: int = field(
-        default=None, metadata={"help": "Real-time chunking steps for inference."}
+    inference_rtc_overlap_steps: int = field(
+        default=None, metadata={"help": "Real-time chunking full overlap steps for inference."}
     )
-    inference_rtc_freeze_steps: int = field(
+    inference_rtc_frozen_steps: int = field(
         default=None, metadata={"help": "Real-time chunking freeze steps for inference."}
     )
 
@@ -393,13 +393,13 @@ class FlowmatchingActionHead(nn.Module):
         # this treats the action sequence as a in-painting problem, if the inference_rtc_size is provided, we will take
         # the "action" from the action_input and take the last inference_rtc_size steps as the initial actions
         use_rtc = False
-        if self.config.inference_rtc_steps is not None and "action" in action_input.keys():
+        if self.config.inference_rtc_overlap_steps is not None and "action" in action_input.keys():
             assert (
                 "action" in action_input.keys()
             ), "action must be in action_input when using Realtime chunking"
-            # take the last prior action [batch, inference_rtc_steps, action_dim] and move it as the first inference_rtc_steps steps
-            actions[:, : self.config.inference_rtc_steps, :] = action_input["action"][
-                :, -self.config.inference_rtc_steps :, :
+            # take the last prior action [batch, inference_rtc_overlap_steps, action_dim] and move it as the first inference_rtc_overlap_steps steps
+            actions[:, : self.config.inference_rtc_overlap_steps, :] = action_input["action"][
+                :, -self.config.inference_rtc_overlap_steps :, :
             ]
             use_rtc = True
 
@@ -409,11 +409,24 @@ class FlowmatchingActionHead(nn.Module):
         vel_strength = torch.ones_like(actions)
         if use_rtc:
             # we will only freeze the freeze steps, which is the entire e2e forward pass time.
-            vel_strength[:, : self.config.inference_rtc_freeze_steps, :] = 0.0
-            # TODO: use a decay strength to set the remaining unfrozen rtc_steps
+            vel_strength[:, : self.config.inference_rtc_frozen_steps, :] = 0.0
+            # # NOTE: use an exponential ramp strength to set the remaining unfrozen rtc_steps
+            intermediate_steps = (
+                self.config.inference_rtc_overlap_steps - self.config.inference_rtc_frozen_steps
+            )
+            # # Create exponential ramp from 0 to 1 over intermediate steps
+            t = torch.linspace(0.0, 1.0, intermediate_steps + 2, device=device)
+            ramp = 1 - torch.exp(-3.0 * t)  # NOTE: this is a hyperparameter, can be tuned
+            ramp = ramp / ramp[-1].clamp_min(1e-8)  # normalize to [0,1]
+            ramp = ramp[
+                1:-1
+            ]  # we will only take the middle part of the ramp, ignore the 0.0 and 1.0
+            # Apply ramp to the intermediate steps [batch, intermediate_steps, action_dim]
             vel_strength[
-                :, self.config.inference_rtc_freeze_steps : self.config.inference_rtc_steps, :
-            ] = 0.6
+                :,
+                self.config.inference_rtc_frozen_steps : self.config.inference_rtc_overlap_steps,
+                :,
+            ] = ramp[None, :, None].to(device)
 
         # Run denoising steps.
         for t in range(num_steps):
@@ -444,15 +457,6 @@ class FlowmatchingActionHead(nn.Module):
             pred = self.action_decoder(model_output, embodiment_id)
 
             pred_velocity = pred[:, -self.action_horizon :]
-
-            # set the vel strength shape same as pred_velocity above, with all default 1.0. "inverse guidance"
-            # vel_strength = torch.ones_like(pred_velocity)
-
-            # # set all non-inpainting portion with vel_strength as 0
-            # if use_rtc:
-            #     # we will only freeze the freeze steps, which is the entire e2e forward pass time.
-            #     vel_strength[:, : self.config.inference_rtc_freeze_steps, :] = 0.0
-            #     # TODO: use a decay strength to set the remaining unfrozen rtc_steps
 
             # Update actions using euler integration.
             actions = actions + dt * pred_velocity * vel_strength

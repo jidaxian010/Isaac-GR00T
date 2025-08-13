@@ -37,35 +37,7 @@ NOTE: provide --model_path to load up the model checkpoint in this script,
 
 python scripts/eval_policy.py --plot --model-path nvidia/GR00T-N1.5-3B
 
-python scripts/eval_policy.py \
-    --model_path nvidia/GR00T-N1.5-3B \
-    --data-config oxe_droid \
-    --dataset-path /datasets/droid-1k/ \
-    --embodiment-tag oxe_droid \
-    --modality-keys eef_position_delta gripper_position eef_rotation_delta  \
-    --steps 300 \
-    --execution-horizon 10 \
-    --inference-latency-steps 4 \
-    --start-traj 25 \
-    --save-plot-path temp.png \
-    --rtc \
-    --trajs 10 \
-
-
-python scripts/eval_policy.py \
-    --model_path nvidia/GR00T-N1.5-3B \
-    --data-config fourier_gr1_arms_waist \
-    --dataset-path datasets/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim/gr1_arms_waist.CuttingboardToPan \
-    --embodiment-tag gr1 \
-    --steps 300 \
-    --execution_horizon 10 \
-    --inference-latency-steps 4 \
-    --start-traj 25 \
-    --trajs 10 \
-    --rtc \
-    --plot --save-plot-path gr1-rtc.png \
 """
-
 
 @dataclass
 class ArgsConfig:
@@ -190,8 +162,8 @@ def main(args: ArgsConfig):
         policy.set_config(
             {
                 "denoising_steps": args.denoising_steps,
-                "rtc_steps": action_horizon - args.execution_horizon,
-                "rtc_freeze_steps": args.inference_latency_steps,
+                "rtc_overlap_steps": action_horizon - args.execution_horizon,
+                "rtc_frozen_steps": args.inference_latency_steps,
             }
         )
     else:

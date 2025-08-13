@@ -189,16 +189,18 @@ class Gr00tPolicy(BasePolicy):
             self.model.action_head.num_inference_timesteps = config.get(
                 "denoising_steps", 16
             )  # TODO: hardcoded to default 16
-            self.model.action_head.config.inference_rtc_steps = config.get("rtc_steps", None)
-            self.model.action_head.config.inference_rtc_freeze_steps = config.get(
-                "rtc_freeze_steps", None
+            self.model.action_head.config.inference_rtc_overlap_steps = config.get(
+                "rtc_overlap_steps", None
+            )
+            self.model.action_head.config.inference_rtc_frozen_steps = config.get(
+                "rtc_frozen_steps", None
             )
             # check if rtc_steps is greater than rtc_freeze_steps if they are defined or non-None
-            if "rtc_steps" in config and config["rtc_steps"] is not None:
+            if "rtc_overlap_steps" in config and config["rtc_overlap_steps"] is not None:
                 assert (
-                    self.model.action_head.config.inference_rtc_steps
-                    > self.model.action_head.config.inference_rtc_freeze_steps
-                ), "rtc_steps must be greater than rtc_freeze_steps"
+                    self.model.action_head.config.inference_rtc_overlap_steps
+                    >= self.model.action_head.config.inference_rtc_frozen_steps
+                ), "rtc_overlap_steps must be greater than or equal to rtc_frozen_steps"
 
         normalized_action = self._get_action_from_normalized_input(normalized_input)
         unnormalized_action = self._get_unnormalized_action(normalized_action)
