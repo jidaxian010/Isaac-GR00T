@@ -161,7 +161,9 @@ class FlowmatchingActionHeadConfig(PretrainedConfig):
     inference_rtc_frozen_steps: int = field(
         default=None, metadata={"help": "Real-time chunking freeze steps for inference."}
     )
-    rtc_ramp_rate: float = field(default=6.0, metadata={"help": "Ramp rate for real-time chunking."})
+    rtc_ramp_rate: float = field(
+        default=6.0, metadata={"help": "Ramp rate for real-time chunking."}
+    )
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
