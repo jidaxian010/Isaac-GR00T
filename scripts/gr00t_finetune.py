@@ -375,7 +375,7 @@ def main(config: ArgsConfig):
         save_strategy="steps",
         save_steps=config.save_steps,
         # evaluation_strategy="no",
-        save_total_limit=8,
+        save_total_limit=5,
         report_to=config.report_to,
         seed=42,
         do_eval=False,

@@ -59,16 +59,17 @@ def calc_mse_for_single_trajectory(
     intermediate_overlap_steps = action_horizon - execution_horizon - inference_latency_steps
 
     for step_count in range(steps):
-        # data_point = dataset.get_step_data(traj_id, step_count)
-        # NOTE this is to get all modality keys concatenated
+        data_point = None
         if plot_state:
+            data_point = dataset.get_step_data(traj_id, step_count)
             concat_state = np.concatenate(
                 [data_point[f"state.{key}"][0] for key in modality_keys], axis=0
             )
             state_joints_across_time.append(concat_state)
 
         if step_count % execution_horizon == 0:
-            data_point = dataset.get_step_data(traj_id, step_count)
+            if data_point is None:
+                data_point = dataset.get_step_data(traj_id, step_count)
 
             # TODO: hack all actions in the data_point to be the same as the previous action
             # remove action.*** from data_point to new_data_point
@@ -116,6 +117,11 @@ def calc_mse_for_single_trajectory(
                     # only append the action_horizon - action_horizon steps
                     elif inference_latency_steps <= j < action_horizon - intermediate_overlap_steps:
                         pred_action_across_time.append(concat_pred_action)
+
+                concat_gt_action = np.concatenate(
+                    [data_point[f"action.{key}"][j] for key in modality_keys], axis=0
+                )
+                gt_action_across_time.append(concat_gt_action)
 
     # plot the joints
     state_joints_across_time = np.array(state_joints_across_time)[:steps]
