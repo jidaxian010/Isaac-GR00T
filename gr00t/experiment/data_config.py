@@ -764,6 +764,87 @@ class OxeDroidDataConfig:
         return ComposedModalityTransform(transforms=transforms)
 
 
+class OxeDroidV2DataConfig(OxeDroidDataConfig):
+    # use verbose video keys
+    video_keys = [
+        "video.exterior_image_1",
+        # "video.exterior_image_2",
+        "video.wrist_image",
+    ]
+    state_keys = [
+        "state.joint_position",
+        "state.gripper_position",
+    ]
+    action_keys = [
+        "action.joint_position",
+        "action.gripper_position",
+    ]
+    language_keys = ["annotation.language.language_instruction"]
+    observation_indices = [0]
+    action_indices = list(range(30))
+
+    def transform(self):
+        transforms = [
+            # video transforms
+            VideoToTensor(apply_to=self.video_keys),
+            VideoCrop(apply_to=self.video_keys, scale=0.95),
+            VideoResize(apply_to=self.video_keys, height=224, width=224, interpolation="linear"),
+            VideoColorJitter(
+                apply_to=self.video_keys,
+                brightness=0.3,
+                contrast=0.4,
+                saturation=0.5,
+                hue=0.08,
+            ),
+            VideoToNumpy(apply_to=self.video_keys),
+            # state transforms
+            StateActionToTensor(apply_to=self.state_keys),
+            StateActionSinCosTransform(apply_to=["state.joint_position"]),
+            StateActionTransform(
+                apply_to=self.state_keys,
+                normalization_modes={
+                    # "state.joint_position": "min_max",
+                    "state.gripper_position": "min_max",
+                },
+            ),
+            # action transforms
+            StateActionToTensor(apply_to=self.action_keys),
+            StateActionTransform(
+                apply_to=self.action_keys,
+                normalization_modes={
+                    "action.gripper_position": "min_max",
+                    "action.joint_position": "min_max",
+                },
+            ),
+            # concat transforms
+            ConcatTransform(
+                video_concat_order=self.video_keys,
+                state_concat_order=self.state_keys,
+                action_concat_order=self.action_keys,
+            ),
+            GR00TTransform(
+                state_horizon=len(self.observation_indices),
+                action_horizon=len(self.action_indices),
+                max_state_dim=64,
+                max_action_dim=32,
+            ),
+        ]
+        return ComposedModalityTransform(transforms=transforms)
+
+
+# in the data_config.py
+class OxeDroidV3DataConfig(So100DataConfig):
+    video_keys = [
+        "video.exterior_image_1",
+        "video.wrist_image",
+    ]
+    state_keys = ["state.joint_position", "state.gripper_position"]
+    action_keys = ["action.joint_position", "action.gripper_position"]
+    language_keys = ["annotation.language.language_instruction"]
+    observation_indices = [0]
+    action_indices = list(range(30))
+
+
 ###########################################################################################
 
 
@@ -891,5 +972,8 @@ DATA_CONFIG_MAP = {
     "unitree_g1": UnitreeG1DataConfig(),
     "unitree_g1_full_body": UnitreeG1FullBodyDataConfig(),
     "oxe_droid": OxeDroidDataConfig(),
+    "oxe_droid_v2": OxeDroidV2DataConfig(),
+    "oxe_droid_v3": OxeDroidV3DataConfig(),
     "agibot_genie1": AgibotGenie1DataConfig(),
 }
+
