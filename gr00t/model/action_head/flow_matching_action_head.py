@@ -396,15 +396,17 @@ class FlowmatchingActionHead(nn.Module):
         # this treats the action sequence as a in-painting problem, if the inference_rtc_size is provided, we will take
         # the "action" from the action_input and take the last inference_rtc_size steps as the initial actions
         use_rtc = False
-        if self.config.inference_rtc_overlap_steps is not None and "action" in action_input.keys():
-            assert (
-                "action" in action_input.keys()
-            ), "action must be in action_input when using Realtime chunking"
-            # take the last prior action [batch, inference_rtc_overlap_steps, action_dim] and move it as the first inference_rtc_overlap_steps steps
-            actions[:, : self.config.inference_rtc_overlap_steps, :] = action_input["action"][
-                :, -self.config.inference_rtc_overlap_steps :, :
-            ]
-            use_rtc = True
+        if self.config.inference_rtc_overlap_steps is not None:
+            if "action" not in action_input.keys():
+                print(
+                    "WARNING: action.* is mandatory when using Realtime chunking, we will not use RTC"
+                )
+            else:
+                # take the last prior action [batch, inference_rtc_overlap_steps, action_dim] and move it as the first inference_rtc_overlap_steps steps
+                actions[:, : self.config.inference_rtc_overlap_steps, :] = action_input["action"][
+                    :, -self.config.inference_rtc_overlap_steps :, :
+                ]
+                use_rtc = True
 
         num_steps = self.num_inference_timesteps
         dt = 1.0 / num_steps
