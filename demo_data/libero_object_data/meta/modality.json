@@ -1,0 +1,41 @@
+{
+    "state": {
+        "ee_pos": {
+            "start": 0,
+            "end": 3
+        },
+        "ee_ori": {
+            "start": 3,
+            "end": 6
+        },
+        "ee_states": {
+            "start": 6,
+            "end": 12
+        },
+        "gripper_states": {
+            "start": 12,
+            "end": 14
+        },
+        "joint_states": {
+            "start": 14,
+            "end": 21
+        }
+    },
+    "action": {
+        "all_actions": {
+            "start": 0,
+            "end": 7
+        }
+    },
+    "video": {
+        "agentview_rgb": {
+            "original_key": "observation.images.agentview_rgb"
+        },
+        "eye_in_hand_rgb": {
+            "original_key": "observation.images.eye_in_hand_rgb"
+        }
+    },
+    "annotation": {
+        "human.action.task_description": {}
+    }
+}

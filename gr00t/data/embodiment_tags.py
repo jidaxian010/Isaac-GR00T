@@ -36,6 +36,11 @@ class EmbodimentTag(Enum):
     """
     Any new embodiment for finetuning.
     """
+    
+    LIBERO_ARM = "libero_arm"
+    """
+    The Libero Arm dataset.
+    """
 
 
 # Embodiment tag string: to projector index in the Action Expert Module
