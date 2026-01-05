@@ -23,7 +23,8 @@ from transformers import TrainingArguments, set_seed
 # Note: We use duck typing instead of isinstance checks to support custom dataset implementations
 # from gr00t.data.dataset import LeRobotMixtureDataset, LeRobotSingleDataset
 from gr00t.experiment.trainer import DualBrainTrainer
-from gr00t.model.gr00t_n1 import GR00T_N1_5
+# from gr00t.model.gr00t_n1 import GR00T_N1_5
+from vla_feedback.model.gr00t_model import GR00T_N1_5
 from gr00t.model.transforms import DefaultDataCollator
 from gr00t.utils.experiment import (
     CheckpointFormatCallback,

@@ -13,5 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .gr00t_n1 import GR00T_N1_5
+# Commented out to avoid circular import issues when using custom vla_feedback.model modules
+# from .gr00t_n1 import GR00T_N1_5
 from .policy import Gr00tPolicy
