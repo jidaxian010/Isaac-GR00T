@@ -773,8 +773,8 @@ class AgibotGenie1DataConfig(BaseDataConfig):
 
 
 class PandaHandDataConfig(BaseDataConfig):  # libero panda hand
-    # video_keys = ["video.agentview_rgb", "video.eye_in_hand_rgb"]
-    video_keys = ["video.agentview_rgb"]
+    video_keys = ["video.agentview_rgb", "video.eye_in_hand_rgb"]
+    # video_keys = ["video.agentview_rgb"]
     state_keys = [
         "state.ee_pos",
         "state.ee_ori",

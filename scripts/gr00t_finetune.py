@@ -18,7 +18,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 import torch
 import tyro
@@ -26,8 +26,8 @@ from transformers import TrainingArguments
 
 from gr00t.data.dataset import LeRobotMixtureDataset, LeRobotSingleDataset
 from gr00t.data.schema import EmbodimentTag
-from gr00t.experiment.data_config import load_data_config
 from gr00t.experiment.runner import TrainRunner
+from omegaconf import OmegaConf
 from gr00t.model.gr00t_n1 import GR00T_N1_5
 from gr00t.model.transforms import EMBODIMENT_TAG_MAPPING
 from gr00t.utils.peft import get_lora_model
@@ -51,6 +51,17 @@ class ArgsConfig:
     - Built-in configs: Use predefined config names like 'so100', 'fourier_gr1_arms_only', 'unitree_g1'.
     - External configs: Use 'module:ClassName' format to load custom configs from external files. e.g. 'my_dir.my_configs:RobotConfig'
     See gr00t/experiment/data_config.py for more details.
+    """
+
+    config_file: Optional[str] = None
+    """Path to YAML configuration file. Settings from YAML will override command-line arguments."""
+
+    data_config_loader_module: str = "gr00t.experiment.data_config"
+    """
+    Module path to import load_data_config function from.
+    Options:
+    - "gr00t.experiment.data_config" (default, original GR00T data config)
+    - "vla_feedback.dataset.data_config" (custom VLA-Feedback data config)
     """
 
     # Training parameters
@@ -140,6 +151,15 @@ class ArgsConfig:
 #####################################################################################
 
 
+def get_load_data_config_function(module_path: str):
+    """Dynamically import and return the load_data_config function from the specified module."""
+    import importlib
+    module = importlib.import_module(module_path)
+    if not hasattr(module, "load_data_config"):
+        raise AttributeError(f"Module '{module_path}' does not have 'load_data_config' function")
+    return module.load_data_config
+
+
 def _copy_partial_action_expert_weights(old_dict, new_dict, old_dim, new_dim):
     """
     Copy weights with partial dimension matching for action_dim changes.
@@ -197,6 +217,7 @@ def main(config: ArgsConfig):
     embodiment_tag = EmbodimentTag(config.embodiment_tag)
 
     # 1.1 modality configs and transforms
+    load_data_config = get_load_data_config_function(config.data_config_loader_module)
     data_config_cls = load_data_config(config.data_config)
     modality_configs = data_config_cls.modality_config()
     transforms = data_config_cls.transform()
@@ -393,6 +414,61 @@ def main(config: ArgsConfig):
 
 
 if __name__ == "__main__":
+    # Check for --config-file in command line arguments first
+    yaml_config = {}
+    config_file_path = None
+    if "--config-file" in sys.argv:
+        config_file_idx = sys.argv.index("--config-file")
+        if config_file_idx + 1 < len(sys.argv):
+            config_file_path = sys.argv[config_file_idx + 1]
+            # Resolve path - if relative, try relative to current dir, then relative to script dir
+            config_file_path = Path(config_file_path)
+            if not config_file_path.is_absolute():
+                # Try relative to current working directory first
+                if not config_file_path.exists():
+                    # Try relative to project root (4 levels up from scripts/gr00t_finetune.py)
+                    project_root = Path(__file__).parent.parent.parent.parent
+                    alt_path = project_root / config_file_path
+                    if alt_path.exists():
+                        config_file_path = alt_path
+                config_file_path = config_file_path.resolve()
+            if not config_file_path.exists():
+                raise FileNotFoundError(
+                    f"Config file not found: {config_file_path}\n"
+                    f"Current working directory: {Path.cwd()}\n"
+                    f"Script directory: {Path(__file__).parent}"
+                )
+            yaml_config = OmegaConf.load(str(config_file_path))
+            yaml_config = OmegaConf.to_container(yaml_config, resolve=True)
+    
+    # Convert YAML config to command-line arguments format and merge with sys.argv
+    # Only add args that aren't already in sys.argv (command-line takes precedence)
+    if yaml_config:
+        yaml_args = []
+        for key, value in yaml_config.items():
+            # Skip config_file itself to avoid recursion
+            if key == "config_file":
+                continue
+            # Tyro accepts both --key-name and --key_name format
+            # Use underscore format to match dataclass field names
+            arg_key_underscore = f"--{key}"
+            arg_key_hyphen = f"--{key.replace('_', '-')}"
+            # Check if this argument is already in sys.argv (either format)
+            if arg_key_underscore not in sys.argv and arg_key_hyphen not in sys.argv:
+                # Use hyphen format (more common in CLI)
+                yaml_args.append(arg_key_hyphen)
+                # Handle list values (like dataset_path)
+                if isinstance(value, list):
+                    yaml_args.extend([str(v) for v in value])
+                elif isinstance(value, bool):
+                    # For boolean flags, tyro handles True/False strings
+                    yaml_args.append(str(value).lower())
+                else:
+                    yaml_args.append(str(value))
+        # Insert YAML args at the beginning (after script name)
+        # Command-line args will override YAML args since they come later
+        sys.argv = sys.argv[:1] + yaml_args + sys.argv[1:]
+    
     # Parse arguments using tyro
     config = tyro.cli(ArgsConfig)
 
