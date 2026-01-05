@@ -13,6 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Commented out to avoid circular import issues when using custom vla_feedback.model modules
-# from .gr00t_n1 import GR00T_N1_5
+# Conditional import based on GR00T_MODULE_MODE environment variable
+# This allows switching between baseline (submodule) and example (custom) modes
+import os
+_module_mode = os.environ.get("GR00T_MODULE_MODE", "example")
+if _module_mode == "baseline":
+    from .gr00t_n1 import GR00T_N1_5
 from .policy import Gr00tPolicy

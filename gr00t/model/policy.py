@@ -236,8 +236,13 @@ class Gr00tPolicy(BasePolicy):
         return True
 
     def _load_model(self, model_path):
-        from vla_feedback.model.gr00t_model import GR00T_N1_5
-        # from gr00t.model.gr00t_n1 import GR00T_N1_5
+        # Conditional import based on GR00T_MODULE_MODE environment variable
+        import os
+        _module_mode = os.environ.get("GR00T_MODULE_MODE", "example")
+        if _module_mode == "baseline":
+            from gr00t.model.gr00t_n1 import GR00T_N1_5
+        else:  # example mode
+            from vla_feedback.model.gr00t_model import GR00T_N1_5
 
         model = GR00T_N1_5.from_pretrained(model_path, torch_dtype=COMPUTE_DTYPE)
         model.eval()  # Set model to eval mode
@@ -255,12 +260,15 @@ class Gr00tPolicy(BasePolicy):
             new_action_head_config = model.action_head.config
             new_action_head_config.action_horizon = expected_action_horizon
 
-            from vla_feedback.model.flow_matching import (
-                FlowmatchingActionHead,
-            )
-            # from gr00t.model.action_head.flow_matching_action_head import (
-            #     FlowmatchingActionHead,
-            # )
+            # Conditional import for FlowmatchingActionHead
+            if _module_mode == "baseline":
+                from gr00t.model.action_head.flow_matching_action_head import (
+                    FlowmatchingActionHead,
+                )
+            else:  # example mode
+                from vla_feedback.model.flow_matching import (
+                    FlowmatchingActionHead,
+                )
 
             # Create new action head with updated config
             new_action_head = FlowmatchingActionHead(new_action_head_config)
