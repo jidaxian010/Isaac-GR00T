@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from typing import Tuple
 
 import numpy as np
+import os
+import time
 import torch
 import tree
 from huggingface_hub import snapshot_download
@@ -172,11 +174,48 @@ class GR00T_N1_5(PreTrainedModel):
         self,
         inputs: dict,
     ) -> BatchFeature:
+        timing_enabled = os.getenv("GR00T_TIMING", "0") == "1"
+
+        def maybe_sync():
+            if timing_enabled and torch.cuda.is_available():
+                torch.cuda.synchronize()
+
+        if timing_enabled:
+            maybe_sync()
+            start_wall = time.time()
+            start_perf = time.perf_counter()
+
         backbone_inputs, action_inputs = self.prepare_input(inputs)
         # Because the behavior of backbones remains the same for training and inference, we can use `forward` for backbones.
+        if timing_enabled:
+            maybe_sync()
+            backbone_start = time.perf_counter()
         backbone_outputs = self.backbone(backbone_inputs)
+        if timing_enabled:
+            maybe_sync()
+            backbone_end = time.perf_counter()
+
+        if timing_enabled:
+            maybe_sync()
+            action_head_start = time.perf_counter()
         action_head_outputs = self.action_head.get_action(backbone_outputs, action_inputs)
+        if timing_enabled:
+            maybe_sync()
+            action_head_end = time.perf_counter()
+
         self.validate_data(action_head_outputs, backbone_outputs, is_training=False)
+        if timing_enabled:
+            total_ms = (action_head_end - start_perf) * 1000.0
+            backbone_ms = (backbone_end - backbone_start) * 1000.0
+            action_head_ms = (action_head_end - action_head_start) * 1000.0
+            print("="*90)
+            print(
+                f"[GR00T timing] wall={start_wall:.3f} "
+                f"backbone_ms={backbone_ms:.2f} "
+                f"action_head_ms={action_head_ms:.2f} "
+                f"total_ms={total_ms:.2f}"
+            )
+            print("="*90)
         return action_head_outputs
 
     def prepare_input(self, inputs) -> Tuple[BatchFeature, BatchFeature]:
