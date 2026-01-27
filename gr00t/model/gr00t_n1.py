@@ -202,6 +202,8 @@ class GR00T_N1_5(PreTrainedModel):
         tune_llm = kwargs.pop("tune_llm", False)
         tune_projector = kwargs.pop("tune_projector", True)
         tune_diffusion_model = kwargs.pop("tune_diffusion_model", True)
+        # Pop tune_feedback to prevent it from being passed to __init__() (not used in baseline mode)
+        kwargs.pop("tune_feedback", False)
 
         print(f"Loading pretrained dual brain from {pretrained_model_name_or_path}")
         print(f"Tune backbone vision tower: {tune_visual}")
