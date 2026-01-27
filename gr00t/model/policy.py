@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import json
+import inspect
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
@@ -33,7 +34,9 @@ COMPUTE_DTYPE = torch.bfloat16
 
 class BasePolicy(ABC):
     @abstractmethod
-    def get_action(self, observations: Dict[str, Any]) -> Dict[str, Any]:
+    def get_action(
+        self, observations: Dict[str, Any], time_step: Optional[int] = None
+    ) -> Dict[str, Any]:
         """
         Abstract method to get the action for a given state.
 
@@ -105,6 +108,7 @@ class Gr00tPolicy(BasePolicy):
 
         # Load model
         self._load_model(model_path)
+        self._supports_time_step = self._model_supports_time_step()
         # Load transforms
         self._load_metadata(self.model_path / "experiment_cfg")
         # Load horizons
@@ -142,7 +146,9 @@ class Gr00tPolicy(BasePolicy):
         """
         return self._modality_transform.unapply(action)
 
-    def get_action(self, observations: Dict[str, Any]) -> Dict[str, Any]:
+    def get_action(
+        self, observations: Dict[str, Any], time_step: Optional[int] = None
+    ) -> Dict[str, Any]:
         """
         Make a prediction with the model.
         Args:
@@ -177,23 +183,44 @@ class Gr00tPolicy(BasePolicy):
                 obs_copy[k] = np.array(v)
 
         normalized_input = self.apply_transforms(obs_copy)
-        normalized_action = self._get_action_from_normalized_input(normalized_input)
+        normalized_action = self._get_action_from_normalized_input(
+            normalized_input, time_step
+        )
         unnormalized_action = self._get_unnormalized_action(normalized_action)
 
         if not is_batch:
             unnormalized_action = squeeze_dict_values(unnormalized_action)
         return unnormalized_action
 
-    def _get_action_from_normalized_input(self, normalized_input: Dict[str, Any]) -> torch.Tensor:
+    def _get_action_from_normalized_input(
+        self, normalized_input: Dict[str, Any], time_step: Optional[int] = None
+    ) -> torch.Tensor:
         # Set up autocast context if needed
         with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=COMPUTE_DTYPE):
-            model_pred = self.model.get_action(normalized_input)
+            if time_step is not None and self._supports_time_step:
+                model_pred = self.model.get_action(normalized_input, time_step)
+            else:
+                model_pred = self.model.get_action(normalized_input)
 
         normalized_action = model_pred["action_pred"].float()
         return normalized_action
 
     def _get_unnormalized_action(self, normalized_action: torch.Tensor) -> Dict[str, Any]:
         return self.unapply_transforms({"action": normalized_action.cpu()})
+
+    def _model_supports_time_step(self) -> bool:
+        try:
+            sig = inspect.signature(self.model.get_action)
+        except (TypeError, ValueError):
+            return False
+        params = list(sig.parameters.values())
+        if any(
+            p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD) for p in params
+        ):
+            return True
+        if any(p.name == "time_step" for p in params):
+            return True
+        return len(params) > 1
 
     def get_modality_config(self) -> Dict[str, ModalityConfig]:
         """
