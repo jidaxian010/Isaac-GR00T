@@ -96,24 +96,61 @@ class DualBrainTrainer(transformers.Trainer):
         if self.optimizer is None:
             decay_parameters = get_parameter_names(opt_model, ALL_LAYERNORM_LAYERS)
             decay_parameters = [name for name in decay_parameters if "bias" not in name]
+
+            # Separate ResNet obs_encoder layer3/layer4 params (need higher LR)
+            RESNET_LR_MULTIPLIER = 100.0
+            resnet_keywords = ("obs_encoder.layer3", "obs_encoder.layer4")
+
+            def _is_resnet_finetune(name):
+                return any(kw in name for kw in resnet_keywords)
+
             optimizer_grouped_parameters = [
+                # Group 1: ResNet layer3/layer4 with decay — 10× LR
                 {
                     "params": [
-                        p
-                        for n, p in opt_model.named_parameters()
-                        if (n in decay_parameters and p.requires_grad)
+                        p for n, p in opt_model.named_parameters()
+                        if (n in decay_parameters and p.requires_grad and _is_resnet_finetune(n))
+                    ],
+                    "weight_decay": self.args.weight_decay,
+                    "lr": self.args.learning_rate * RESNET_LR_MULTIPLIER,
+                },
+                # Group 2: ResNet layer3/layer4 without decay — 10× LR
+                {
+                    "params": [
+                        p for n, p in opt_model.named_parameters()
+                        if (n not in decay_parameters and p.requires_grad and _is_resnet_finetune(n))
+                    ],
+                    "weight_decay": 0.0,
+                    "lr": self.args.learning_rate * RESNET_LR_MULTIPLIER,
+                },
+                # Group 3: Normal params with decay — base LR
+                {
+                    "params": [
+                        p for n, p in opt_model.named_parameters()
+                        if (n in decay_parameters and p.requires_grad and not _is_resnet_finetune(n))
                     ],
                     "weight_decay": self.args.weight_decay,
                 },
+                # Group 4: Normal params without decay — base LR
                 {
                     "params": [
-                        p
-                        for n, p in opt_model.named_parameters()
-                        if (n not in decay_parameters and p.requires_grad)
+                        p for n, p in opt_model.named_parameters()
+                        if (n not in decay_parameters and p.requires_grad and not _is_resnet_finetune(n))
                     ],
                     "weight_decay": 0.0,
                 },
             ]
+
+            # Log ResNet param group info
+            resnet_count = sum(
+                p.numel() for n, p in opt_model.named_parameters()
+                if p.requires_grad and _is_resnet_finetune(n)
+            )
+            if resnet_count > 0:
+                print(
+                    f"✓ ResNet layer3/layer4: {resnet_count:,} params with "
+                    f"{RESNET_LR_MULTIPLIER}× LR ({self.args.learning_rate * RESNET_LR_MULTIPLIER:.6f})"
+                )
 
             optimizer_cls, optimizer_kwargs = transformers.Trainer.get_optimizer_cls_and_kwargs(
                 self.args
