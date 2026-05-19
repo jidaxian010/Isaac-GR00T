@@ -861,7 +861,7 @@ class PandaHandDataConfig(BaseDataConfig):  # libero panda hand
 ###########################################################################################
 
 class DroidJointDataConfig(BaseDataConfig):
-    """DROID robot with delta joint position actions (8-dim: 7 joints + gripper)."""
+    """DROID robot with joint velocity actions (8-dim: 7 joints + gripper)."""
 
     video_keys = [
         "video.exterior_image_1",
@@ -872,7 +872,7 @@ class DroidJointDataConfig(BaseDataConfig):
         "state.gripper_position",
     ]
     action_keys = [
-        "action.joint_position_delta",
+        "action.joint_velocity",
         "action.gripper_position",
     ]
     language_keys = ["annotation.language.language_instruction"]
@@ -901,7 +901,7 @@ class DroidJointDataConfig(BaseDataConfig):
             StateActionTransform(
                 apply_to=self.action_keys,
                 normalization_modes={
-                    "action.joint_position_delta": "min_max",
+                    "action.joint_velocity": "min_max",
                     "action.gripper_position": "binary",
                 },
             ),
